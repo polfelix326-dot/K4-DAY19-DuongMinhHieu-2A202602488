@@ -54,9 +54,28 @@ def normalize_crime(name: str) -> str:
 
 def link_entity(name: str, known: list[str], normalize: Callable[[str], str] = normalize_crime) -> str | None:
     """Map a free-text mention (e.g. a charge written by a journalist) onto one canonical name in `known`."""
-    # TODO KG-1: normalize both sides, exact match first, then difflib.get_close_matches(cutoff=0.8).
-    #            Return the ORIGINAL spelling from `known`; return None when nothing is close enough.
-    raise NotImplementedError("TODO KG-1 link_entity (src/graph.py) - kiểm tra: pytest tests/test_graph.py -k LinkEntity")
+    if not name or not known:
+        return None
+    norm_name = normalize(name)
+    if not norm_name:
+        return None
+
+    norm_to_orig: dict[str, str] = {}
+    for item in known:
+        norm_item = normalize(item)
+        if norm_item and norm_item not in norm_to_orig:
+            norm_to_orig[norm_item] = item
+
+    # 1. Exact match after normalize
+    if norm_name in norm_to_orig:
+        return norm_to_orig[norm_name]
+
+    # 2. Fuzzy match with cutoff=0.8
+    matches = difflib.get_close_matches(norm_name, list(norm_to_orig.keys()), n=1, cutoff=0.8)
+    if matches:
+        return norm_to_orig[matches[0]]
+
+    return None
 
 def find_substances(text: str) -> list[str]:
     lowered = text.lower()
@@ -122,14 +141,25 @@ def extract_news_cases(doc: Document, llm_fn: Callable[[str], str], known_crimes
         crimes="; ".join(known_crimes), substances=", ".join(SUBSTANCES),
         title=doc.metadata.get("title", ""), content=doc.content[:12000],
     )
+    raw = llm_fn(prompt)
+    if isinstance(raw, str):
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else ""
+            raw = raw.rsplit("```", 1)[0].strip()
     try:
-        cases = json.loads(llm_fn(prompt)).get("cases", [])
+        cases = json.loads(raw).get("cases", [])
     except (json.JSONDecodeError, AttributeError):
         return []
     for case in cases:
         case["charges"] = sorted({c for c in (link_entity(x, known_crimes) for x in case.get("charges", [])) if c})
         for person in case.get("people", []):
             person["charge"] = link_entity(person.get("charge") or "", known_crimes) or ""
+        for s in case.get("substances", []):
+            if s.get("name"):
+                linked_s = link_entity(s["name"], SUBSTANCES, normalize=lambda x: x.strip().lower())
+                if linked_s:
+                    s["name"] = linked_s
     return cases
 
 # ----------------------------------------------------------------------------------------------
@@ -269,11 +299,21 @@ class Neo4jGraph:
 def build_graph(graph: Neo4jGraph, law_docs: list[Document], news_docs: list[Document],
                 llm_fn: Callable[..., str]) -> None:
     """Load both KBs into an empty graph. llm_fn(prompt, json_mode=False) -> str (metered OpenAI chat)."""
-    # TODO KG-2: create YOUR ontology in Neo4j from both KBs.
-    #   Contract: every node created from one document has the property doc_id = Document.id.
-    #   Fastest start: the HINT helpers above (parse_law_article, extract_news_cases, suggested_constraints,
-    #   add_law_article, add_news_case). Own ontology + report/ONTOLOGY.md = bonus (SUBMISSION.md).
-    raise NotImplementedError("TODO KG-2 build_graph (src/graph.py) - kiểm tra: python bench_kg.py --build --limit 2")
+    graph.suggested_constraints()
+    articles = [parse_law_article(d) for d in law_docs]
+    for a in articles:
+        graph.add_law_article(a)
+    crimes = [a["crime"] for a in articles if a["crime"]]
+
+    def call_llm(prompt: str) -> str:
+        try:
+            return llm_fn(prompt, json_mode=True)
+        except TypeError:
+            return llm_fn(prompt)
+
+    for d in news_docs:
+        for case in extract_news_cases(d, call_llm, crimes):
+            graph.add_news_case(case, d)
 
 # ---------------------------------------------------------------------------------------------- KG-4
 
