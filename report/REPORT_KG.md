@@ -11,22 +11,22 @@ Dán 2 bảng `Indexing` và `Querying` từ `ket_qua_benchmark_kg.txt`:
 ```text
 == Indexing (one-off)
 pipeline  calls    in_tok  out_tok       USD  seconds
-flat        176         0        0   0.00000    103.5
-graph       196     34619     5357   0.00560    177.4
+flat        176         0        0   0.00000    120.5
+graph       196     34619     5373   0.00561    313.1
 
 == Querying (mean per question)
 pipeline  recall  judge   in_tok  out_tok       USD  seconds
-flat        0.51   1.50      696       76   0.00010     1.43
-graph       0.94   1.83     6017      140   0.00066     3.15
+flat        0.51   1.50      696       71   0.00010    10.19
+graph       0.94   1.83     5888      172   0.00066     5.76
 ```
 
 | Chỉ số | Flat | Graph | Graph / Flat |
 | --- | --- | --- | --- |
-| Indexing USD | $0.00000 | $0.00560 | +$0.00560 (20 lần gọi LLM) |
-| Indexing giây | 103.5s | 177.4s | ×1.71 |
+| Indexing USD | $0.00000 | $0.00561 | +$0.00561 (20 lần gọi LLM) |
+| Indexing giây | 120.5s | 313.1s | ×2.60 |
 | Mỗi câu: USD | $0.00010 | $0.00066 | ×6.60 |
-| Mỗi câu: giây | 1.43s | 3.15s | ×2.20 |
-| Mỗi câu: in_tok | 696 | 6017 | ×8.65 |
+| Mỗi câu: giây | 10.19s | 5.76s | ×0.57 |
+| Mỗi câu: in_tok | 696 | 5888 | ×8.46 |
 
 **Chi phí tăng thêm đến từ đâu?** (2–3 câu)
 > Ở giai đoạn Indexing, GraphRAG phải gọi thêm 20 lần LLM để trích xuất có cấu trúc (JSON) các vụ án, người, chất và tội danh từ 20 bài báo tin tức (tiêu tốn ~34,6k input tokens và ~5,3k output tokens). Khi truy vấn (Querying), GraphRAG mở rộng ngữ cảnh qua multi-hop traversal (kèm các quan hệ, tóm tắt vụ việc và điều khoản định khung), khiến số lượng token đầu vào tăng gấp 8.65 lần (6.017 so với 696), dẫn đến chi phí mỗi câu tăng 6.6 lần và độ trễ tăng 2.2 lần so với Flat RAG.
